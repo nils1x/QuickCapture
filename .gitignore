@@ -1,0 +1,12 @@
+# Compiled output
+QuickCapture.app/
+QuickCapture
+
+# macOS noise
+.DS_Store
+*.swp
+*.orig
+
+# Editor
+.vscode/
+.cursor/
