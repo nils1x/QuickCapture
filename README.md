@@ -1,6 +1,6 @@
 # QuickCapture
 
-A minimal macOS menu bar app that lets you capture a bullet point into today's Obsidian daily note from anywhere — instantly.
+A minimal macOS menu bar app that lets you capture a bullet point into today's Obsidian daily note — or create a reminder in Apple Reminders — from anywhere, instantly.
 
 ![macOS](https://img.shields.io/badge/macOS-13%2B-black) ![Swift](https://img.shields.io/badge/Swift-5.9%2B-orange) ![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
@@ -8,9 +8,16 @@ A minimal macOS menu bar app that lets you capture a bullet point into today's O
 
 ## What it does
 
-Hit `⌥Q` from any app. A small Spotlight-style window appears centered on screen. Type your thought. Hit `↩`. Done — it's a bullet point at the bottom of today's daily note. Hit `esc` to dismiss without saving.
+Hit `⌥Q` from any app. A small Spotlight-style window appears centered on screen. Type your thought. Hit `↩`. Done. Hit `esc` to dismiss without saving.
 
-No Electron. No background daemon. No Xcode project. One Swift file, ~350 lines, zero dependencies beyond AppKit and Carbon (both ship with macOS).
+Two capture modes, switched with `Tab`:
+
+| Mode | Icon | Action |
+|---|---|---|
+| **Obsidian** (default) | `paperplane.fill` | Appends `- your thought` to today's daily note |
+| **Reminders** | `inset.filled.circle` | Creates a new reminder in your "Dump" list, due today |
+
+No Electron. No background daemon. No Xcode project. One Swift file, ~450 lines, zero dependencies beyond AppKit, Carbon, and EventKit (all ship with macOS).
 
 ---
 
@@ -19,7 +26,7 @@ No Electron. No background daemon. No Xcode project. One Swift file, ~350 lines,
 **Requirements:** macOS 13+, Xcode Command Line Tools (`xcode-select --install`)
 
 ```bash
-git clone https://github.com/yourusername/QuickCapture
+git clone https://github.com/nils1x/QuickCapture
 cd QuickCapture
 bash build.sh
 open QuickCapture.app
@@ -30,6 +37,8 @@ On first launch the app auto-detects your Obsidian vault and creates a config fi
 ```
 ~/.config/quickcapture/config
 ```
+
+**Note:** The first time you capture in Reminders mode, macOS will prompt for Reminders access. Click "Allow".
 
 ---
 
@@ -64,6 +73,17 @@ Each capture appends to the bottom:
 
 ---
 
+## Reminders mode
+
+In Reminders mode, captures create a new reminder in a list named **"Dump"** with:
+- Title = your text
+- Due date = today
+- No priority, location, or time
+
+To use a different list, either rename your list to "Dump" or edit the list name in `QuickCapture.swift` and rebuild.
+
+---
+
 ## Hotkey
 
 Default is `⌥Q`. To change it, edit the top of `QuickCapture.swift`:
@@ -85,9 +105,11 @@ Then rebuild: `bash build.sh`
 | Layer | Detail |
 |---|---|
 | **Global hotkey** | Carbon `RegisterEventHotKey` — fires on any app, any Space, no Accessibility permission needed |
-| **Window** | `NSPanel` with `.borderless` style, `NSVisualEffectView` blur background, 22px corner radius, `masksToBounds` clips the blur clean |
+| **Window** | `NSPanel` with `.borderless` style, `NSVisualEffectView` blur background (`.menu` material + dark overlay), 32px corner radius |
+| **Mode switching** | `Tab` cycles between Obsidian and Reminders modes; icon updates instantly |
 | **Text input** | `NSTextView` with frame-math vertical centering — `y = (windowH - lineH) / 2` using real font metrics |
 | **File I/O** | Plain `String` read/write on a background thread — dismiss is instant, write happens after |
+| **Reminders** | EventKit `EKEventStore` — creates reminders with ad-hoc code signing + entitlements for TCC access |
 | **No Dock icon** | `.accessory` activation policy — lives only in the menu bar |
 
 ---

@@ -18,6 +18,7 @@ swiftc \
   "$DIR/$APP_NAME.swift" \
   -framework AppKit \
   -framework Carbon \
+  -framework EventKit \
   -framework Foundation
 
 echo "Packaging into .app bundle…"
@@ -52,9 +53,27 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSRemindersUsageDescription</key>
+  <string>QuickCapture creates reminders from the global hotkey.</string>
 </dict>
 </plist>
 PLIST
+
+# Entitlements — required for Reminders access (TCC)
+cat > "$DIR/$APP_NAME.entitlements" <<ENT
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <false/>
+</dict>
+</plist>
+ENT
+
+# Ad-hoc sign with entitlements so TCC allows Reminders access
+codesign --sign - --entitlements "$DIR/$APP_NAME.entitlements" --force "$APP"
+rm -f "$DIR/$APP_NAME.entitlements"
 
 echo "Done."
 echo "App: $APP"
