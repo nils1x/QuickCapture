@@ -4,6 +4,7 @@
 
 import AppKit
 import Carbon.HIToolbox
+import EventKit
 import Foundation
 
 // MARK: - Config
@@ -12,23 +13,23 @@ import Foundation
 
 enum Config {
     // Window / hotkey constants (not user-configurable at runtime)
-    static let hotkeyMods: UInt32 = 0x0800   // ⌥  (cmd=0x0100 ctrl=0x1000 shift=0x0200)
+    static let hotkeyMods: UInt32 = 0x0800  // ⌥  (cmd=0x0100 ctrl=0x1000 shift=0x0200)
     static let hotkeyCode: UInt32 = UInt32(kVK_ANSI_Q)
     static let W: CGFloat = 460
     static let H: CGFloat = 76
-    static let R: CGFloat = 22
+    static let R: CGFloat = 32
 
     // Loaded from config file at launch
-    static let vault:      String = UserConfig.load().vault
+    static let vault: String = UserConfig.load().vault
     static let journalDir: String = vault + "/" + UserConfig.load().journalFolder
-    static let template:   String = vault + "/" + UserConfig.load().templatePath
+    static let template: String = vault + "/" + UserConfig.load().templatePath
 }
 
 // Reads/writes ~/.config/quickcapture/config (simple key=value format)
 struct UserConfig {
-    var vault:          String
-    var journalFolder:  String
-    var templatePath:   String
+    var vault: String
+    var journalFolder: String
+    var templatePath: String
 
     static let configPath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -37,12 +38,12 @@ struct UserConfig {
 
     static func load() -> UserConfig {
         let defaults = UserConfig(
-            vault:         defaultVault(),
+            vault: defaultVault(),
             journalFolder: "10_Journal",
-            templatePath:  "00_Inbox/templates/Daily Template.md"
+            templatePath: "00_Inbox/templates/Daily Template.md"
         )
         guard let raw = try? String(contentsOfFile: configPath, encoding: .utf8) else {
-            write(defaults)   // first launch — create config file
+            write(defaults)  // first launch — create config file
             return defaults
         }
         var cfg = defaults
@@ -51,11 +52,11 @@ struct UserConfig {
             guard parts.count >= 2 else { continue }
             let key = parts[0].trimmingCharacters(in: .whitespaces)
             let val = parts.dropFirst().joined(separator: "=")
-                           .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: .whitespaces)
             switch key {
-            case "vault":          cfg.vault          = val
-            case "journal_folder": cfg.journalFolder  = val
-            case "template_path":  cfg.templatePath   = val
+            case "vault": cfg.vault = val
+            case "journal_folder": cfg.journalFolder = val
+            case "template_path": cfg.templatePath = val
             default: break
             }
         }
@@ -64,19 +65,20 @@ struct UserConfig {
 
     static func write(_ cfg: UserConfig) {
         let dir = (configPath as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir,
-                                                  withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            atPath: dir,
+            withIntermediateDirectories: true)
         let content = """
-        # QuickCapture config
-        # Absolute path to your Obsidian vault root
-        vault=\(cfg.vault)
+            # QuickCapture config
+            # Absolute path to your Obsidian vault root
+            vault=\(cfg.vault)
 
-        # Folder inside the vault where daily notes live
-        journal_folder=\(cfg.journalFolder)
+            # Folder inside the vault where daily notes live
+            journal_folder=\(cfg.journalFolder)
 
-        # Path inside the vault to the daily note template
-        template_path=\(cfg.templatePath)
-        """
+            # Path inside the vault to the daily note template
+            template_path=\(cfg.templatePath)
+            """
         try? content.write(toFile: configPath, atomically: true, encoding: .utf8)
     }
 
@@ -85,16 +87,31 @@ struct UserConfig {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let icloud = home + "/Library/Mobile Documents/iCloud~md~obsidian/Documents"
         if let vaults = try? FileManager.default.contentsOfDirectory(atPath: icloud),
-           let first = vaults.first(where: { !$0.hasPrefix(".") }) {
+            let first = vaults.first(where: { !$0.hasPrefix(".") })
+        {
             return icloud + "/" + first
         }
         return home + "/Documents/ObsidianVault"
     }
 }
 
+// MARK: - Mode
+
+enum CaptureMode {
+    case obsidian
+    case reminders
+
+    var symbolName: String {
+        switch self {
+        case .obsidian:  return "paperplane.fill"
+        case .reminders: return "inset.filled.circle"
+        }
+    }
+}
+
 // MARK: - App
 
-let app  = NSApplication.shared
+let app = NSApplication.shared
 let root = Root()
 app.delegate = root
 app.setActivationPolicy(.accessory)
@@ -106,16 +123,20 @@ final class Root: NSObject, NSApplicationDelegate {
     private var panel: Panel!
     private var hotkeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
+    var mode: CaptureMode = .obsidian
+    private let eventStore = EKEventStore()
 
     func applicationDidFinishLaunching(_ n: Notification) {
         // Menu bar icon
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "square.and.pencil",
-                                     accessibilityDescription: nil)
+        item.button?.image = NSImage(
+            systemSymbolName: "square.and.pencil",
+            accessibilityDescription: nil)
         let menu = NSMenu()
         menu.addItem(withTitle: "Show  (⌥Q)", action: #selector(toggle), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(
+            withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
 
         // Build panel once, reuse forever
@@ -123,8 +144,11 @@ final class Root: NSObject, NSApplicationDelegate {
 
         // Carbon global hotkey — fires on any app, any space
         let target = GetApplicationEventTarget()
-        let spec = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
-                                  eventKind:  UInt32(kEventHotKeyPressed))]
+        let spec = [
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyPressed))
+        ]
         let ptr = Unmanaged.passUnretained(self).toOpaque()
         let cb: EventHandlerUPP = { _, _, ud in
             guard let ud else { return noErr }
@@ -132,9 +156,10 @@ final class Root: NSObject, NSApplicationDelegate {
             return noErr
         }
         InstallEventHandler(target, cb, 1, spec, ptr, &eventHandler)
-        RegisterEventHotKey(Config.hotkeyCode, Config.hotkeyMods,
-                            EventHotKeyID(signature: 0x51435054, id: 1),
-                            target, 0, &hotkeyRef)
+        RegisterEventHotKey(
+            Config.hotkeyCode, Config.hotkeyMods,
+            EventHotKeyID(signature: 0x5143_5054, id: 1),
+            target, 0, &hotkeyRef)
     }
 
     @objc func toggle() {
@@ -143,8 +168,10 @@ final class Root: NSObject, NSApplicationDelegate {
 
     func present() {
         let f = (NSScreen.main ?? NSScreen.screens[0]).visibleFrame
-        panel.setFrameOrigin(NSPoint(x: f.midX - Config.W / 2,
-                                     y: f.midY - Config.H / 2 + 80))
+        panel.setFrameOrigin(
+            NSPoint(
+                x: f.midX - Config.W / 2,
+                y: f.midY - Config.H / 2 + 80))
         panel.captureView.reset()
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
@@ -156,11 +183,21 @@ final class Root: NSObject, NSApplicationDelegate {
         panel.orderOut(nil)
     }
 
+    func cycleMode() {
+        mode = (mode == .obsidian) ? .reminders : .obsidian
+        panel.captureView.updateModeIcon(mode)
+    }
+
     func commit(text: String) {
         dismiss()
-        // File I/O off main thread — zero perceived latency
         let t = text
-        DispatchQueue.global(qos: .userInitiated).async { self.write(t) }
+        let m = mode
+        DispatchQueue.global(qos: .userInitiated).async {
+            switch m {
+            case .obsidian:  self.write(t)
+            case .reminders: self.createReminder(t)
+            }
+        }
     }
 
     // MARK: File I/O
@@ -179,21 +216,47 @@ final class Root: NSObject, NSApplicationDelegate {
     }
 
     private func notePathEnsured() -> String? {
-        let df = DateFormatter(); df.dateFormat = "dd-MM-yyyy"
+        let df = DateFormatter()
+        df.dateFormat = "dd-MM-yyyy"
         let path = Config.journalDir + "/" + df.string(from: Date()) + ".md"
         guard !FileManager.default.fileExists(atPath: path) else { return path }
 
-        let dfW = DateFormatter(); dfW.dateFormat = "EEEE"
-        let dmy = df.string(from: Date()), day = dfW.string(from: Date())
+        let dfW = DateFormatter()
+        dfW.dateFormat = "EEEE"
+        let dmy = df.string(from: Date())
+        let day = dfW.string(from: Date())
         let body: String
         if let t = try? String(contentsOfFile: Config.template, encoding: .utf8) {
-            body = t
+            body =
+                t
                 .replacingOccurrences(of: "{{date:DD-MM-YYYY}}", with: dmy)
                 .replacingOccurrences(of: "{{date:dddd}}", with: day)
                 .replacingOccurrences(of: "{{date}}", with: dmy)
-        } else { body = "# \(dmy) - \(day)\n***\n" }
+        } else {
+            body = "# \(dmy) - \(day)\n***\n"
+        }
         try? body.write(toFile: path, atomically: true, encoding: .utf8)
         return path
+    }
+
+    // MARK: Reminders
+
+    private func createReminder(_ text: String) {
+        let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+
+        eventStore.requestFullAccessToReminders { [weak self] granted, _ in
+            guard let self, granted else { return }
+            let calendars = self.eventStore.calendars(for: .reminder)
+            guard let dump = calendars.first(where: { $0.title == "Dump" }) else { return }
+
+            let reminder = EKReminder(eventStore: self.eventStore)
+            reminder.title = title
+            reminder.calendar = dump
+            reminder.dueDateComponents = Calendar.current.dateComponents(
+                [.year, .month, .day], from: Date())
+            try? self.eventStore.save(reminder, commit: true)
+        }
     }
 }
 
@@ -204,9 +267,10 @@ final class Panel: NSPanel {
 
     init(root: Root) {
         captureView = CaptureView(root: root)
-        super.init(contentRect: NSRect(x: 0, y: 0, width: Config.W, height: Config.H),
-                   styleMask: [.borderless, .nonactivatingPanel],
-                   backing: .buffered, defer: true)   // defer: true = faster init
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: Config.W, height: Config.H),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: true)  // defer: true = faster init
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
@@ -240,12 +304,9 @@ final class CaptureView: NSVisualEffectView, NSTextViewDelegate {
     private weak var root: Root?
 
     // Subviews
-    private let tv   = NSTextView()
-    private let clip = NSClipView()   // needed to host NSTextView properly
-    private let date = NSTextField(labelWithString: {
-        let df = DateFormatter(); df.dateFormat = "dd-MM-yyyy"
-        return df.string(from: Date())
-    }())
+    private let tv = NSTextView()
+    private let clip = NSClipView()  // needed to host NSTextView properly
+    private let modeIcon = NSImageView()
 
     // Cached font metrics — computed once
     private let fontSize: CGFloat = 17
@@ -258,16 +319,24 @@ final class CaptureView: NSVisualEffectView, NSTextViewDelegate {
         self.root = root
         super.init(frame: NSRect(x: 0, y: 0, width: Config.W, height: Config.H))
 
-        // Blur background
+        // Blur background — darker material for less transparency
         blendingMode = .behindWindow
-        material = .hudWindow
+        material = .menu
         state = .active
         wantsLayer = true
         layer?.cornerRadius = Config.R
         layer?.masksToBounds = true
 
+        // Semi-opaque dark overlay for a deeper, less transparent look
+        let overlay = NSView(frame: bounds)
+        overlay.wantsLayer = true
+        overlay.layer?.backgroundColor = NSColor(white: 0, alpha: 0.45).cgColor
+        overlay.layer?.cornerRadius = Config.R
+        overlay.autoresizingMask = [.width, .height]
+        addSubview(overlay, positioned: .below, relativeTo: nil)
+
         setupTV()
-        setupDate()
+        setupModeIcon()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -293,31 +362,43 @@ final class CaptureView: NSVisualEffectView, NSTextViewDelegate {
         addSubview(tv)
     }
 
-    private func setupDate() {
-        date.font = .systemFont(ofSize: 9, weight: .regular)
-        date.textColor = NSColor(white: 1, alpha: 0.28)
-        date.drawsBackground = false
-        date.isBezeled = false
-        date.isEditable = false
-        addSubview(date)
+    private func setupModeIcon() {
+        modeIcon.symbolConfiguration = .init(pointSize: 18, weight: .regular)
+        modeIcon.contentTintColor = NSColor(white: 1, alpha: 0.42)
+        modeIcon.image = NSImage(
+            systemSymbolName: CaptureMode.obsidian.symbolName,
+            accessibilityDescription: nil)
+        modeIcon.imageScaling = .scaleProportionallyUpOrDown
+        addSubview(modeIcon)
+    }
+
+    func updateModeIcon(_ mode: CaptureMode) {
+        modeIcon.image = NSImage(
+            systemSymbolName: mode.symbolName,
+            accessibilityDescription: nil)
     }
 
     // MARK: - Frame-based layout — called once on first show and on resize
 
     override func layout() {
         super.layout()
-        let w = bounds.width, h = bounds.height
+        let w = bounds.width
+        let h = bounds.height
         let hPad: CGFloat = 20
+        let iconSize: CGFloat = 22
+        let iconGap: CGFloat = 10
 
-        // Text view: one line, vertically centered in the full height
-        let tvW = w - hPad * 2
+        // Mode icon: left-aligned, vertically centered
+        let iconX = hPad
+        let iconY = (h - iconSize) / 2
+        modeIcon.frame = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
+
+        // Text view: starts after icon + gap, vertically centered
+        let tvX = hPad + iconSize + iconGap
+        let tvW = w - tvX - hPad
         let tvY = (h - lineH) / 2
-        tv.frame = NSRect(x: hPad, y: tvY, width: tvW, height: lineH)
+        tv.frame = NSRect(x: tvX, y: tvY, width: tvW, height: lineH)
         tv.textContainer?.size = NSSize(width: tvW, height: .greatestFiniteMagnitude)
-
-        // Date label: bottom-right
-        let dlW: CGFloat = 72
-        date.frame = NSRect(x: w - dlW - 14, y: 6, width: dlW, height: 12)
     }
 
     // MARK: - First responder
@@ -330,14 +411,16 @@ final class CaptureView: NSVisualEffectView, NSTextViewDelegate {
     // MARK: - Esc key on the view itself (fallback)
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { root?.dismiss() }
-        else { super.keyDown(with: event) }
+        if event.keyCode == 53 { root?.dismiss() } else { super.keyDown(with: event) }
     }
 
     // MARK: - NSTextViewDelegate
 
     func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
         switch sel {
+        case #selector(NSResponder.insertTab(_:)):
+            root?.cycleMode()
+            return true
         case #selector(NSResponder.insertNewline(_:)):
             let text = tv.string
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
